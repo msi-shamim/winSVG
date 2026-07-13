@@ -107,6 +107,24 @@ Set-ItemProperty -Path $svgExtensionKeyPath -Name '(default)' -Value $svgProgId
 New-Item -Path "$svgExtensionKeyPath\OpenWithProgids" -Force | Out-Null
 New-ItemProperty -Path "$svgExtensionKeyPath\OpenWithProgids" -Name $svgProgId -Value '' -PropertyType String -Force | Out-Null
 
+# Register SVG Preview as a first-class app in Windows "Default Apps"
+# (Settings > Apps > Default apps) so the user can pick it as the default
+# handler through the supported UI. Windows 10/11 cryptographically protect
+# the final double-click choice (UserChoice hash), so this registration plus
+# one user click in the picker is the sanctioned path to becoming default.
+$capabilitiesKeyPath = 'HKCU:\Software\SvgPreview\Capabilities'
+New-Item -Path "$capabilitiesKeyPath\FileAssociations" -Force | Out-Null
+Set-ItemProperty -Path $capabilitiesKeyPath -Name 'ApplicationName' -Value 'SVG Preview'
+Set-ItemProperty -Path $capabilitiesKeyPath -Name 'ApplicationDescription' -Value 'Lightweight SVG image viewer with Explorer thumbnail support'
+Set-ItemProperty -Path "$capabilitiesKeyPath\FileAssociations" -Name '.svg' -Value $svgProgId
+Set-ItemProperty -Path "$capabilitiesKeyPath\FileAssociations" -Name '.svgz' -Value $svgProgId
+
+$registeredApplicationsKeyPath = 'HKCU:\Software\RegisteredApplications'
+if (-not (Test-Path $registeredApplicationsKeyPath)) {
+    New-Item -Path $registeredApplicationsKeyPath -Force | Out-Null
+}
+Set-ItemProperty -Path $registeredApplicationsKeyPath -Name 'SVG Preview' -Value 'Software\SvgPreview\Capabilities'
+
 # Register the executable itself so it appears in the "Open with" app list.
 $applicationKeyPath = "$classesRoot\Applications\SvgViewer.exe"
 New-Item -Path "$applicationKeyPath\shell\open\command" -Force | Out-Null
