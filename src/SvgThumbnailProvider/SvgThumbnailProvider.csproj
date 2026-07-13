@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Generates SvgThumbnailProvider.comhost.dll so Windows Explorer (a native
+         COM host) can load this managed shell extension. -->
+    <EnableComHosting>true</EnableComHosting>
+    <SelfContained>false</SelfContained>
+    <AssemblyName>SvgThumbnailProvider</AssemblyName>
+    <RootNamespace>SvgThumbnailProvider</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Svg.Skia rasterizes SVG documents via SkiaSharp without needing a browser. -->
+    <PackageReference Include="Svg.Skia" Version="2.*" />
+  </ItemGroup>
+
+</Project>

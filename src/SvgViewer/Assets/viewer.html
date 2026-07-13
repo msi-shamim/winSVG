@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SVG Preview</title>
+<style>
+  :root {
+    --toolbar-bg: rgba(30, 30, 30, 0.92);
+    --toolbar-fg: #e8e8e8;
+    --accent: #4da3ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; }
+
+  /* --- Stage backgrounds (cycled with the B key / button) --- */
+  body.bg-checker {
+    background-color: #ffffff;
+    background-image:
+      linear-gradient(45deg, #d9d9d9 25%, transparent 25%, transparent 75%, #d9d9d9 75%),
+      linear-gradient(45deg, #d9d9d9 25%, transparent 25%, transparent 75%, #d9d9d9 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 10px 10px;
+  }
+  body.bg-white { background: #ffffff; }
+  body.bg-black { background: #111111; }
+
+  #stage { position: absolute; inset: 0; cursor: grab; }
+  #stage.panning { cursor: grabbing; }
+
+  #svgImage {
+    position: absolute;
+    top: 0; left: 0;
+    transform-origin: 0 0;
+    /* Keep vector edges crisp when scaled by the browser. */
+    image-rendering: -webkit-optimize-contrast;
+    user-select: none;
+    -webkit-user-drag: none;
+    display: none;
+  }
+
+  /* --- Bottom toolbar --- */
+  #toolbar {
+    position: absolute;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 10px;
+    background: var(--toolbar-bg);
+    color: var(--toolbar-fg);
+    border-radius: 10px;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+    font-size: 13px;
+    z-index: 10;
+    white-space: nowrap;
+  }
+  #toolbar button {
+    background: transparent;
+    color: var(--toolbar-fg);
+    border: none;
+    border-radius: 6px;
+    padding: 5px 9px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  #toolbar button:hover { background: rgba(255, 255, 255, 0.12); }
+  #toolbar .divider { width: 1px; height: 18px; background: rgba(255, 255, 255, 0.2); margin: 0 4px; }
+  #fileLabel { max-width: 340px; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; }
+  #zoomLabel { min-width: 52px; text-align: center; color: var(--accent); }
+  #positionLabel { color: #9a9a9a; padding: 0 6px; }
+  #dimensionsLabel { color: #9a9a9a; padding: 0 6px; }
+
+  /* --- Empty-state hint shown before any file is loaded --- */
+  #emptyHint {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #8a8a8a;
+    font-size: 15px;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body class="bg-checker">
+  <div id="stage">
+    <img id="svgImage" alt="SVG preview">
+  </div>
+
+  <div id="emptyHint">Press Ctrl+O to open an SVG file</div>
+
+  <div id="toolbar">
+    <button id="prevButton" title="Previous file (←)">◀</button>
+    <span id="positionLabel">–/–</span>
+    <button id="nextButton" title="Next file (→)">▶</button>
+    <span class="divider"></span>
+    <span id="fileLabel">No file</span>
+    <span id="dimensionsLabel"></span>
+    <span class="divider"></span>
+    <button id="zoomOutButton" title="Zoom out (-)">−</button>
+    <span id="zoomLabel">100%</span>
+    <button id="zoomInButton" title="Zoom in (+)">＋</button>
+    <button id="fitButton" title="Fit to window (0)">Fit</button>
+    <button id="actualSizeButton" title="Actual size (1)">1:1</button>
+    <span class="divider"></span>
+    <button id="backgroundButton" title="Cycle background (B)">▦ BG</button>
+    <button id="openButton" title="Open file (Ctrl+O)">Open…</button>
+  </div>
+
+<script>
+"use strict";
+
+/**
+ * Viewer state: current zoom scale and pan offset applied to the SVG image,
+ * plus the image's natural pixel size once it has loaded.
+ */
+const viewerState = {
+  zoomScale: 1,
+  panOffsetX: 0,
+  panOffsetY: 0,
+  naturalWidth: 0,
+  naturalHeight: 0,
+  hasImage: false,
+};
+
+const MIN_ZOOM_SCALE = 0.02;
+const MAX_ZOOM_SCALE = 64;
+const BACKGROUND_CLASSES = ["bg-checker", "bg-white", "bg-black"];
+let activeBackgroundIndex = 0;
+
+const stageElement = document.getElementById("stage");
+const svgImageElement = document.getElementById("svgImage");
+const emptyHintElement = document.getElementById("emptyHint");
+const fileLabelElement = document.getElementById("fileLabel");
+const positionLabelElement = document.getElementById("positionLabel");
+const dimensionsLabelElement = document.getElementById("dimensionsLabel");
+const zoomLabelElement = document.getElementById("zoomLabel");
+
+/**
+ * Posts a command message to the C# host window.
+ * @param {string} commandName - Command identifier understood by MainWindow.
+ */
+function postCommandToHost(commandName) {
+  if (window.chrome && window.chrome.webview) {
+    window.chrome.webview.postMessage({ command: commandName });
+  }
+}
+
+/**
+ * Applies the current zoom scale and pan offset to the image element.
+ */
+function applyViewTransform() {
+  svgImageElement.style.transform =
+    `translate(${viewerState.panOffsetX}px, ${viewerState.panOffsetY}px) scale(${viewerState.zoomScale})`;
+  zoomLabelElement.textContent = `${Math.round(viewerState.zoomScale * 100)}%`;
+}
+
+/**
+ * Scales the image so it fits entirely inside the stage with a small margin,
+ * then centers it. Never scales above 100% for small images.
+ */
+function fitImageToStage() {
+  if (!viewerState.hasImage) return;
+  const stageWidth = stageElement.clientWidth;
+  const stageHeight = stageElement.clientHeight;
+  const fitMargin = 40;
+  const fitScale = Math.min(
+    (stageWidth - fitMargin) / viewerState.naturalWidth,
+    (stageHeight - fitMargin) / viewerState.naturalHeight,
+    1
+  );
+  viewerState.zoomScale = Math.max(fitScale, MIN_ZOOM_SCALE);
+  centerImageInStage();
+}
+
+/**
+ * Shows the image at its natural (100%) pixel size, centered in the stage.
+ */
+function showImageAtActualSize() {
+  if (!viewerState.hasImage) return;
+  viewerState.zoomScale = 1;
+  centerImageInStage();
+}
+
+/**
+ * Centers the image within the stage at the current zoom scale.
+ */
+function centerImageInStage() {
+  viewerState.panOffsetX = (stageElement.clientWidth - viewerState.naturalWidth * viewerState.zoomScale) / 2;
+  viewerState.panOffsetY = (stageElement.clientHeight - viewerState.naturalHeight * viewerState.zoomScale) / 2;
+  applyViewTransform();
+}
+
+/**
+ * Zooms toward a specific point on the stage so the content under the cursor
+ * stays put while the scale changes.
+ * @param {number} zoomFactor - Multiplier applied to the current scale.
+ * @param {number} anchorX - X coordinate (stage space) to keep stationary.
+ * @param {number} anchorY - Y coordinate (stage space) to keep stationary.
+ */
+function zoomAroundPoint(zoomFactor, anchorX, anchorY) {
+  if (!viewerState.hasImage) return;
+  const previousScale = viewerState.zoomScale;
+  const nextScale = Math.min(MAX_ZOOM_SCALE, Math.max(MIN_ZOOM_SCALE, previousScale * zoomFactor));
+  const effectiveFactor = nextScale / previousScale;
+
+  viewerState.panOffsetX = anchorX - (anchorX - viewerState.panOffsetX) * effectiveFactor;
+  viewerState.panOffsetY = anchorY - (anchorY - viewerState.panOffsetY) * effectiveFactor;
+  viewerState.zoomScale = nextScale;
+  applyViewTransform();
+}
+
+/**
+ * Loads a new SVG file into the viewer. Invoked by the C# host through
+ * ExecuteScriptAsync whenever the current file changes.
+ * @param {string} svgFileUrl - Virtual-host URL of the SVG file.
+ * @param {string} displayFileName - File name shown in the toolbar.
+ * @param {number} positionInFolder - 1-based index among sibling SVG files.
+ * @param {number} totalInFolder - Total count of sibling SVG files.
+ */
+function showFile(svgFileUrl, displayFileName, positionInFolder, totalInFolder) {
+  fileLabelElement.textContent = displayFileName;
+  fileLabelElement.title = displayFileName;
+  positionLabelElement.textContent = `${positionInFolder}/${totalInFolder}`;
+
+  svgImageElement.onload = () => {
+    viewerState.naturalWidth = svgImageElement.naturalWidth || 300;
+    viewerState.naturalHeight = svgImageElement.naturalHeight || 150;
+    viewerState.hasImage = true;
+    dimensionsLabelElement.textContent = `${viewerState.naturalWidth}×${viewerState.naturalHeight}`;
+    svgImageElement.style.display = "block";
+    emptyHintElement.style.display = "none";
+    fitImageToStage();
+  };
+  svgImageElement.onerror = () => {
+    emptyHintElement.style.display = "flex";
+    emptyHintElement.textContent = `Could not load ${displayFileName}`;
+  };
+
+  // Cache-bust so edits to the same file show up when navigating back to it.
+  svgImageElement.src = `${svgFileUrl}?t=${Date.now()}`;
+}
+
+/* --- Mouse wheel: zoom around the cursor --- */
+stageElement.addEventListener("wheel", (wheelEvent) => {
+  wheelEvent.preventDefault();
+  const zoomFactor = wheelEvent.deltaY < 0 ? 1.2 : 1 / 1.2;
+  zoomAroundPoint(zoomFactor, wheelEvent.clientX, wheelEvent.clientY);
+}, { passive: false });
+
+/* --- Mouse drag: pan --- */
+let isPanning = false;
+let lastPointerX = 0;
+let lastPointerY = 0;
+
+stageElement.addEventListener("pointerdown", (pointerEvent) => {
+  if (pointerEvent.button !== 0) return;
+  isPanning = true;
+  lastPointerX = pointerEvent.clientX;
+  lastPointerY = pointerEvent.clientY;
+  stageElement.classList.add("panning");
+  stageElement.setPointerCapture(pointerEvent.pointerId);
+});
+
+stageElement.addEventListener("pointermove", (pointerEvent) => {
+  if (!isPanning) return;
+  viewerState.panOffsetX += pointerEvent.clientX - lastPointerX;
+  viewerState.panOffsetY += pointerEvent.clientY - lastPointerY;
+  lastPointerX = pointerEvent.clientX;
+  lastPointerY = pointerEvent.clientY;
+  applyViewTransform();
+});
+
+stageElement.addEventListener("pointerup", () => {
+  isPanning = false;
+  stageElement.classList.remove("panning");
+});
+
+/* --- Double-click: toggle between fit and 100% --- */
+stageElement.addEventListener("dblclick", () => {
+  if (Math.abs(viewerState.zoomScale - 1) < 0.001) {
+    fitImageToStage();
+  } else {
+    showImageAtActualSize();
+  }
+});
+
+/**
+ * Advances to the next background style (checkerboard → white → black).
+ */
+function cycleBackground() {
+  document.body.classList.remove(BACKGROUND_CLASSES[activeBackgroundIndex]);
+  activeBackgroundIndex = (activeBackgroundIndex + 1) % BACKGROUND_CLASSES.length;
+  document.body.classList.add(BACKGROUND_CLASSES[activeBackgroundIndex]);
+}
+
+/* --- Toolbar buttons --- */
+document.getElementById("prevButton").addEventListener("click", () => postCommandToHost("navigatePrevious"));
+document.getElementById("nextButton").addEventListener("click", () => postCommandToHost("navigateNext"));
+document.getElementById("openButton").addEventListener("click", () => postCommandToHost("openFileDialog"));
+document.getElementById("fitButton").addEventListener("click", fitImageToStage);
+document.getElementById("actualSizeButton").addEventListener("click", showImageAtActualSize);
+document.getElementById("backgroundButton").addEventListener("click", cycleBackground);
+document.getElementById("zoomInButton").addEventListener("click", () =>
+  zoomAroundPoint(1.2, stageElement.clientWidth / 2, stageElement.clientHeight / 2));
+document.getElementById("zoomOutButton").addEventListener("click", () =>
+  zoomAroundPoint(1 / 1.2, stageElement.clientWidth / 2, stageElement.clientHeight / 2));
+
+/* --- Keyboard shortcuts --- */
+window.addEventListener("keydown", (keyEvent) => {
+  if (keyEvent.ctrlKey && keyEvent.key.toLowerCase() === "o") {
+    keyEvent.preventDefault();
+    postCommandToHost("openFileDialog");
+    return;
+  }
+  switch (keyEvent.key) {
+    case "ArrowLeft": postCommandToHost("navigatePrevious"); break;
+    case "ArrowRight": postCommandToHost("navigateNext"); break;
+    case "+": case "=": zoomAroundPoint(1.2, stageElement.clientWidth / 2, stageElement.clientHeight / 2); break;
+    case "-": case "_": zoomAroundPoint(1 / 1.2, stageElement.clientWidth / 2, stageElement.clientHeight / 2); break;
+    case "0": fitImageToStage(); break;
+    case "1": showImageAtActualSize(); break;
+    case "b": case "B": cycleBackground(); break;
+    case "Escape": postCommandToHost("closeWindow"); break;
+  }
+});
+
+/* --- Keep the image sensibly placed when the window resizes --- */
+window.addEventListener("resize", () => {
+  if (viewerState.hasImage) fitImageToStage();
+});
+</script>
+</body>
+</html>
