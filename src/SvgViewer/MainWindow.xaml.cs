@@ -148,7 +148,7 @@ public partial class MainWindow : Window
     {
         var openFileDialog = new OpenFileDialog
         {
-            Title = "Open SVG file",
+            Title = "winSVG — Open SVG file",
             Filter = "SVG images (*.svg)|*.svg|All files (*.*)|*.*",
         };
 
@@ -170,7 +170,7 @@ public partial class MainWindow : Window
 
         if (!File.Exists(fullFilePath))
         {
-            MessageBox.Show(this, $"File not found:\n{fullFilePath}", "SVG Preview",
+            MessageBox.Show(this, $"File not found:\n{fullFilePath}", "winSVG",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
@@ -227,7 +227,7 @@ public partial class MainWindow : Window
         string currentFileName = Path.GetFileName(currentFilePath);
         string svgFileUrl = $"https://{SvgFolderVirtualHost}/{Uri.EscapeDataString(currentFileName)}";
 
-        Title = $"{currentFileName} — SVG Preview";
+        Title = $"{currentFileName} — winSVG";
 
         string showFileScript =
             $"showFile({JsonSerializer.Serialize(svgFileUrl)}, {JsonSerializer.Serialize(currentFileName)}, " +

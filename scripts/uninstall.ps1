@@ -44,8 +44,10 @@ foreach ($svgExtension in @('.svg', '.svgz')) {
     }
 }
 
-# Remove the Default Apps registration.
-try { Remove-ItemProperty -Path 'HKCU:\Software\RegisteredApplications' -Name 'SVG Preview' -ErrorAction Stop } catch {}
+# Remove the Default Apps registration (both current and legacy names).
+foreach ($registeredAppName in @('winSVG', 'SVG Preview')) {
+    try { Remove-ItemProperty -Path 'HKCU:\Software\RegisteredApplications' -Name $registeredAppName -ErrorAction Stop } catch {}
+}
 
 # Remove the COM class, ProgId, Open-with, and Capabilities entries.
 foreach ($registryKeyPath in @(

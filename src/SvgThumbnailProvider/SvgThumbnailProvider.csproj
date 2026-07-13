@@ -12,6 +12,8 @@
     <SelfContained>false</SelfContained>
     <AssemblyName>SvgThumbnailProvider</AssemblyName>
     <RootNamespace>SvgThumbnailProvider</RootNamespace>
+    <Version>1.0.0</Version>
+    <Product>winSVG</Product>
   </PropertyGroup>
 
   <ItemGroup>

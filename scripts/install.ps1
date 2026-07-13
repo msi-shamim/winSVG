@@ -114,7 +114,7 @@ New-ItemProperty -Path "$svgExtensionKeyPath\OpenWithProgids" -Name $svgProgId -
 # one user click in the picker is the sanctioned path to becoming default.
 $capabilitiesKeyPath = 'HKCU:\Software\SvgPreview\Capabilities'
 New-Item -Path "$capabilitiesKeyPath\FileAssociations" -Force | Out-Null
-Set-ItemProperty -Path $capabilitiesKeyPath -Name 'ApplicationName' -Value 'SVG Preview'
+Set-ItemProperty -Path $capabilitiesKeyPath -Name 'ApplicationName' -Value 'winSVG'
 Set-ItemProperty -Path $capabilitiesKeyPath -Name 'ApplicationDescription' -Value 'Lightweight SVG image viewer with Explorer thumbnail support'
 Set-ItemProperty -Path "$capabilitiesKeyPath\FileAssociations" -Name '.svg' -Value $svgProgId
 Set-ItemProperty -Path "$capabilitiesKeyPath\FileAssociations" -Name '.svgz' -Value $svgProgId
@@ -123,12 +123,12 @@ $registeredApplicationsKeyPath = 'HKCU:\Software\RegisteredApplications'
 if (-not (Test-Path $registeredApplicationsKeyPath)) {
     New-Item -Path $registeredApplicationsKeyPath -Force | Out-Null
 }
-Set-ItemProperty -Path $registeredApplicationsKeyPath -Name 'SVG Preview' -Value 'Software\SvgPreview\Capabilities'
+Set-ItemProperty -Path $registeredApplicationsKeyPath -Name 'winSVG' -Value 'Software\SvgPreview\Capabilities'
 
 # Register the executable itself so it appears in the "Open with" app list.
 $applicationKeyPath = "$classesRoot\Applications\SvgViewer.exe"
 New-Item -Path "$applicationKeyPath\shell\open\command" -Force | Out-Null
-Set-ItemProperty -Path $applicationKeyPath -Name 'FriendlyAppName' -Value 'SVG Preview'
+Set-ItemProperty -Path $applicationKeyPath -Name 'FriendlyAppName' -Value 'winSVG'
 Set-ItemProperty -Path "$applicationKeyPath\shell\open\command" -Name '(default)' -Value "`"$viewerExecutablePath`" `"%1`""
 New-Item -Path "$applicationKeyPath\SupportedTypes" -Force | Out-Null
 New-ItemProperty -Path "$applicationKeyPath\SupportedTypes" -Name '.svg' -Value '' -PropertyType String -Force | Out-Null

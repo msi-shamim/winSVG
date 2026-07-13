@@ -10,6 +10,8 @@
     <SelfContained>false</SelfContained>
     <AssemblyName>SvgViewer</AssemblyName>
     <RootNamespace>SvgViewer</RootNamespace>
+    <Version>1.0.0</Version>
+    <Product>winSVG</Product>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- App logo embedded in the exe: window title bar, taskbar, Open With
          dialog, and Default Apps all pick it up from here. -->

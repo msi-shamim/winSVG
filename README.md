@@ -1,105 +1,131 @@
-# SVG Preview for Windows
+# winSVG
 
-Windows Explorer does not show thumbnails for `.svg` files, and double-clicking
-one either does nothing useful or dumps you into a browser tab. **SVG Preview**
-fixes both problems for the current user, without requiring administrator
-rights:
+<p align="center">
+  <img src="assets/app-icon.svg" width="128" alt="winSVG logo">
+</p>
 
-| Problem | Solution in this repo |
+**winSVG makes Windows treat SVG files like real images** — thumbnails in
+Explorer, and a fast image viewer on double-click. Free and open-source (MIT).
+
+## The problem
+
+Windows has never treated SVG as a first-class image format:
+
+- **No thumbnails.** Open a folder full of `.svg` icons and Explorer shows a
+  wall of identical generic icons. Finding the right file means opening them
+  one by one.
+- **No previewer.** Double-clicking an SVG either does nothing, opens a text
+  editor, or dumps the file into a browser tab with no zoom/pan/navigation.
+- **Why?** Windows decodes images through the Windows Imaging Component
+  (WIC), and Windows ships no SVG codec — so Photos, Explorer thumbnails, and
+  the preview pane are all blind to SVG.
+
+## The solution
+
+winSVG fills the gap with two small components:
+
+1. **Explorer thumbnail provider** — a COM shell extension that rasterizes
+   SVG (and gzipped `.svgz`) files with the Skia graphics engine, so folders
+   show real, transparency-aware thumbnails at every icon size.
+2. **winSVG viewer** — a lightweight Chromium-fidelity image viewer that
+   opens on double-click, with pan/zoom, folder navigation, and a
+   transparency-checkerboard background.
+
+Everything installs **per-user, with no administrator rights**, and
+uninstalls cleanly from *Settings → Apps → Installed apps*.
+
+## What winSVG can do
+
+| Feature | Details |
 | --- | --- |
-| No thumbnails in Explorer folders | `SvgThumbnailProvider` — a COM shell extension that rasterizes SVGs (via Svg.Skia/SkiaSharp) into real image thumbnails, including transparency |
-| No sensible double-click behavior | `SvgViewer` — a lightweight WPF + WebView2 viewer with pan/zoom, prev/next folder navigation, and background toggle |
+| Explorer thumbnails | Real rendered previews for `.svg` and `.svgz`, with alpha transparency |
+| Double-click viewer | Chromium-quality SVG rendering via WebView2 |
+| Zoom & pan | Mouse-wheel zoom around the cursor, drag to pan, `+`/`-`, double-click toggles fit ↔ 100% |
+| Folder navigation | `←`/`→` flips through every SVG in the folder |
+| Background toggle | `B` cycles checkerboard → white → black (great for white/transparent icons) |
+| Keyboard-first | `0` fit, `1` actual size, `Ctrl+O` open, `Esc` close |
+| File info | Name, pixel dimensions, and position in folder shown in the toolbar |
+| Open With / Default Apps | Registers properly so you can make it the default in one click |
+| Clean uninstall | Restores your previous file association and removes every registry entry |
 
-## Requirements
+## Installation (release version)
+
+1. Download **`winSVG-Setup-x.y.z.exe`** from the
+   [latest release](https://github.com/msi-shamim/winSVG/releases/latest).
+2. Run it. No admin prompt — winSVG installs only for your user account.
+3. Open any folder with SVG files: **thumbnails just work** (press `F5` if
+   the folder was already open).
+4. To make double-click open winSVG: right-click any `.svg` → **Open with →
+   Choose another app → winSVG → Always**. Windows requires this single
+   manual confirmation for default apps — no installer can legitimately skip
+   it.
+
+### Requirements
 
 - Windows 10 / 11 (x64)
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (to build; the
-  installed app only needs the .NET 8 Desktop Runtime)
-- WebView2 Runtime (preinstalled on Windows 11 and most Windows 10 machines)
+- [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0)
+  (free; the installer checks and points you to it if missing)
+- WebView2 Runtime (preinstalled on Windows 11 and most Windows 10 systems)
 
-## Install
+### Uninstall
+
+*Settings → Apps → Installed apps → winSVG → Uninstall*, or re-run the setup
+and choose remove. Your previous `.svg` association is restored.
+
+## Building from source
+
+Requires the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0);
+[Inno Setup 6](https://jrsoftware.org/isinfo.php) only if you want to build
+the installer.
 
 ```powershell
+git clone https://github.com/msi-shamim/winSVG.git
+cd winSVG
+
+# Developer install (publish + copy + register, no installer needed)
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+
+# Or build the release installer
+dotnet publish src\SvgViewer -c Release -o dist\viewer
+dotnet publish src\SvgThumbnailProvider -c Release -o dist\thumbnail
+iscc installer\winSVG.iss   # -> dist\installer\winSVG-Setup-x.y.z.exe
 ```
-
-The script publishes both projects, copies them to `%LOCALAPPDATA%\SvgPreview`,
-and registers everything under `HKCU` (per-user, no admin prompt):
-
-- the thumbnail provider CLSID + the `.svg` / `.svgz` shell extension hookup
-- the `SvgPreview.svg` ProgId with an `open` verb pointing at the viewer
-- an "Open with" entry for `SvgViewer.exe`
-
-Then open the `samples\` folder in Explorer — you should see rendered
-thumbnails. If the folder was already open, press **F5**.
-
-> **Default-app note:** Windows protects double-click defaults with a hashed
-> `UserChoice` key that programs cannot legitimately write. If `.svg` was
-> previously claimed by a browser, right-click an SVG once → **Open with →
-> Choose another app → SVG Preview → Always**. After that, double-click works
-> forever.
-
-## Uninstall
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1
-```
-
-Removes all registry entries (restoring the previous `.svg` association when
-one existed) and deletes `%LOCALAPPDATA%\SvgPreview`.
-
-## Viewer shortcuts
-
-| Key / action | Effect |
-| --- | --- |
-| `←` / `→` | Previous / next SVG in the same folder |
-| Mouse wheel | Zoom around the cursor |
-| Drag | Pan |
-| Double-click | Toggle fit ↔ 100% |
-| `+` / `-` | Zoom in / out |
-| `0` / `1` | Fit to window / actual size |
-| `B` | Cycle background: checkerboard → white → black |
-| `Ctrl+O` | Open file dialog |
-| `Esc` | Close the viewer |
 
 ## Project layout
 
 ```
 src/SvgViewer/              WPF host + WebView2 viewer (Assets/viewer.html is the UI)
 src/SvgThumbnailProvider/   COM thumbnail handler (IThumbnailProvider + IInitializeWithStream)
+installer/winSVG.iss        Inno Setup script for the release installer
 tools/IconGenerator/        Renders assets/app-icon.svg into the multi-size .ico
 assets/app-icon.svg         App logo (source of truth for the icon)
-scripts/install.ps1         Build, deploy to %LOCALAPPDATA%, register (HKCU)
-scripts/uninstall.ps1       Unregister and remove
+scripts/install.ps1         Developer install: build, deploy, register (HKCU)
+scripts/uninstall.ps1       Developer uninstall
 scripts/set-default-viewer.ps1  Clear a stale .svg association claimed by a browser
 samples/                    Test SVGs
 ```
 
-To regenerate the app icon after editing the logo:
+## How it works
 
-```powershell
-dotnet run --project tools\IconGenerator -c Release -- assets\app-icon.svg src\SvgViewer\Assets\app-icon.ico
-```
+**Thumbnails:** Explorer hands the file to the extension as a COM stream
+(`IInitializeWithStream`) and asks for a bitmap (`IThumbnailProvider`). The
+handler parses the SVG with [Svg.Skia](https://github.com/wieslawsoltes/Svg.Skia),
+renders a premultiplied BGRA bitmap scaled to the requested square, copies it
+into a top-down 32-bit GDI DIB section, and returns the `HBITMAP` with
+`WTSAT_ARGB` so transparency survives. The class is exposed through .NET 8's
+built-in COM hosting and registered per-user — no `regsvr32`, no admin.
 
-## How the thumbnail handler works
+**Viewer:** a WPF window hosting WebView2. The C# side owns file access and
+folder navigation; the HTML/JS side renders the SVG with the Chromium engine
+and implements pan/zoom. If the primary URL-based load fails, the host
+re-sends the file as a base64 data URI, so display can't silently break.
 
-Explorer hands the file content to the extension as a COM stream
-(`IInitializeWithStream`), then asks for a bitmap of a given square size
-(`IThumbnailProvider.GetThumbnail`). The handler parses the SVG with
-**Svg.Skia**, renders it into a premultiplied BGRA Skia bitmap scaled to fit
-the requested square, copies the pixels into a top-down 32-bit GDI DIB
-section, and returns the `HBITMAP` with `WTSAT_ARGB` so transparency is
-preserved. The class is exposed to COM through .NET 8's built-in COM hosting
-(`SvgThumbnailProvider.comhost.dll`), registered per-user — no `regsvr32`, no
-admin.
+**Why can't the installer set the double-click default?** Windows 10/11
+protect the final association choice with a cryptographically hashed
+`UserChoice` registry key that only user action through Windows UI can write
+— an anti-hijacking measure. winSVG registers everywhere it legitimately can
+(ProgId, Open With, Default Apps), leaving you exactly one click.
 
-## Troubleshooting
+## License
 
-- **Thumbnails don't appear:** press F5 in the folder; if still missing, sign
-  out/in or run `taskkill /f /im explorer.exe` then `start explorer` to reload
-  the shell. Ensure folder view is set to Medium icons or larger.
-- **Stale/old thumbnails:** Windows caches thumbnails aggressively. Run Disk
-  Cleanup → Thumbnails, or delete `%LOCALAPPDATA%\Microsoft\Windows\Explorer\thumbcache_*.db`
-  while Explorer is stopped.
-- **Reinstall fails copying files:** the DLL is loaded by Explorer's COM
-  surrogate. Run `taskkill /f /im dllhost.exe` and retry the install script.
+[MIT](LICENSE) © MSI Shamim
