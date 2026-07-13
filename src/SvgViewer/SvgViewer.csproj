@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -10,7 +10,7 @@
     <SelfContained>false</SelfContained>
     <AssemblyName>SvgViewer</AssemblyName>
     <RootNamespace>SvgViewer</RootNamespace>
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <Product>winSVG</Product>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- App logo embedded in the exe: window title bar, taskbar, Open With

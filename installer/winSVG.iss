@@ -1,4 +1,4 @@
-; winSVG installer script (Inno Setup 6)
+﻿; winSVG installer script (Inno Setup 6)
 ; Builds winSVG-Setup-<version>.exe: installs the viewer + Explorer thumbnail
 ; provider per-user (no admin rights required) and registers every HKCU key
 ; the app needs. The generated uninstaller reverses all of it.
@@ -7,7 +7,7 @@
 ;   ISCC.exe winSVG.iss
 
 #define MyAppName "winSVG"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.1.1"
 #define MyAppPublisher "MSI Shamim"
 #define MyAppURL "https://github.com/msi-shamim/winSVG"
 #define MyProgId "SvgPreview.svg"

@@ -25,13 +25,25 @@
   body.bg-white { background: #ffffff; }
   body.bg-black { background: #111111; }
 
-  #stage { position: absolute; inset: 0; cursor: grab; }
+  /* Flexbox keeps the image perfectly centered at any window size without
+     any JS measurement — immune to DPI/layout timing races. */
+  #stage {
+    position: absolute;
+    inset: 0;
+    cursor: grab;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
   #stage.panning { cursor: grabbing; }
 
   #svgImage {
-    position: absolute;
-    top: 0; left: 0;
-    transform-origin: 0 0;
+    /* Fit inside the window with a margin; never upscale beyond natural size. */
+    max-width: calc(100% - 48px);
+    max-height: calc(100% - 48px);
+    /* User pan/zoom is applied as a transform on top of the centered layout. */
+    transform-origin: center center;
     /* Keep vector edges crisp when scaled by the browser. */
     image-rendering: -webkit-optimize-contrast;
     user-select: none;
@@ -192,8 +204,11 @@
 "use strict";
 
 /**
- * Viewer state: current zoom scale and pan offset applied to the SVG image,
- * plus the image's natural pixel size once it has loaded.
+ * Viewer state. The image is centered and size-constrained purely by CSS
+ * (flexbox + max-width/max-height), so with zoomScale 1 and zero pan the
+ * image is always fitted and centered regardless of window size or DPI.
+ * zoomScale is relative to that CSS-fitted size; pan offsets shift the image
+ * away from center only when the user drags.
  */
 const viewerState = {
   zoomScale: 1,
@@ -237,65 +252,79 @@ function postCommandToHost(commandName) {
 }
 
 /**
- * Applies the current zoom scale and pan offset to the image element.
+ * Applies the current zoom scale and pan offset as a transform on top of the
+ * CSS-centered layout, then refreshes the zoom percentage readout.
  */
 function applyViewTransform() {
   svgImageElement.style.transform =
     `translate(${viewerState.panOffsetX}px, ${viewerState.panOffsetY}px) scale(${viewerState.zoomScale})`;
-  zoomLabelElement.textContent = `${Math.round(viewerState.zoomScale * 100)}%`;
+  updateZoomLabel();
 }
 
 /**
- * Scales the image so it fits entirely inside the stage with a small margin,
- * then centers it. Never scales above 100% for small images.
+ * Shows the on-screen size relative to the image's natural pixel size.
+ */
+function updateZoomLabel() {
+  if (!viewerState.hasImage || viewerState.naturalWidth === 0) {
+    zoomLabelElement.textContent = "–";
+    return;
+  }
+  const renderedRect = svgImageElement.getBoundingClientRect();
+  zoomLabelElement.textContent = `${Math.round((renderedRect.width / viewerState.naturalWidth) * 100)}%`;
+}
+
+/**
+ * Returns to the default view: identity transform, letting the CSS layout
+ * fit and center the image. Cannot mis-position — no measurements involved.
  */
 function fitImageToStage() {
-  if (!viewerState.hasImage) return;
-  const stageWidth = stageElement.clientWidth;
-  const stageHeight = stageElement.clientHeight;
-  const fitMargin = 40;
-  const fitScale = Math.min(
-    (stageWidth - fitMargin) / viewerState.naturalWidth,
-    (stageHeight - fitMargin) / viewerState.naturalHeight,
-    1
-  );
-  viewerState.zoomScale = Math.max(fitScale, MIN_ZOOM_SCALE);
-  centerImageInStage();
-}
-
-/**
- * Shows the image at its natural (100%) pixel size, centered in the stage.
- */
-function showImageAtActualSize() {
-  if (!viewerState.hasImage) return;
   viewerState.zoomScale = 1;
-  centerImageInStage();
-}
-
-/**
- * Centers the image within the stage at the current zoom scale.
- */
-function centerImageInStage() {
-  viewerState.panOffsetX = (stageElement.clientWidth - viewerState.naturalWidth * viewerState.zoomScale) / 2;
-  viewerState.panOffsetY = (stageElement.clientHeight - viewerState.naturalHeight * viewerState.zoomScale) / 2;
+  viewerState.panOffsetX = 0;
+  viewerState.panOffsetY = 0;
   applyViewTransform();
 }
 
 /**
- * Zooms toward a specific point on the stage so the content under the cursor
- * stays put while the scale changes.
+ * Shows the image at its natural (100%) pixel size, centered.
+ */
+function showImageAtActualSize() {
+  if (!viewerState.hasImage) return;
+  const cssFittedWidth = svgImageElement.clientWidth;
+  if (cssFittedWidth > 0) {
+    viewerState.zoomScale = viewerState.naturalWidth / cssFittedWidth;
+  }
+  viewerState.panOffsetX = 0;
+  viewerState.panOffsetY = 0;
+  applyViewTransform();
+}
+
+/**
+ * True while the view is in the default fitted/centered state.
+ */
+function isInFittedState() {
+  return viewerState.zoomScale === 1 && viewerState.panOffsetX === 0 && viewerState.panOffsetY === 0;
+}
+
+/**
+ * Zooms toward a specific point so the content under the cursor stays put.
+ * Because the untransformed image is flex-centered, its layout center equals
+ * the stage center; pan offsets are relative to that.
  * @param {number} zoomFactor - Multiplier applied to the current scale.
- * @param {number} anchorX - X coordinate (stage space) to keep stationary.
- * @param {number} anchorY - Y coordinate (stage space) to keep stationary.
+ * @param {number} anchorX - X viewport coordinate to keep stationary.
+ * @param {number} anchorY - Y viewport coordinate to keep stationary.
  */
 function zoomAroundPoint(zoomFactor, anchorX, anchorY) {
   if (!viewerState.hasImage) return;
+  const stageRect = stageElement.getBoundingClientRect();
+  const stageCenterX = stageRect.left + stageRect.width / 2;
+  const stageCenterY = stageRect.top + stageRect.height / 2;
+
   const previousScale = viewerState.zoomScale;
   const nextScale = Math.min(MAX_ZOOM_SCALE, Math.max(MIN_ZOOM_SCALE, previousScale * zoomFactor));
   const effectiveFactor = nextScale / previousScale;
 
-  viewerState.panOffsetX = anchorX - (anchorX - viewerState.panOffsetX) * effectiveFactor;
-  viewerState.panOffsetY = anchorY - (anchorY - viewerState.panOffsetY) * effectiveFactor;
+  viewerState.panOffsetX = anchorX - stageCenterX - (anchorX - stageCenterX - viewerState.panOffsetX) * effectiveFactor;
+  viewerState.panOffsetY = anchorY - stageCenterY - (anchorY - stageCenterY - viewerState.panOffsetY) * effectiveFactor;
   viewerState.zoomScale = nextScale;
   applyViewTransform();
 }
@@ -322,9 +351,8 @@ function showFile(imageSource, displayFileName, positionInFolder, totalInFolder,
     dimensionsLabelElement.textContent = `${viewerState.naturalWidth}×${viewerState.naturalHeight}`;
     svgImageElement.style.display = "block";
     emptyHintElement.style.display = "none";
+    // Identity transform = CSS-fitted and centered; no measurement, no race.
     fitImageToStage();
-    // Refit on the next frame in case the window/DPI layout settles after load.
-    requestAnimationFrame(fitImageToStage);
     updateExportSizeHint();
     postCommandToHost("imageLoaded");
   };
@@ -379,10 +407,10 @@ stageElement.addEventListener("pointerup", () => {
 
 /* --- Double-click: toggle between fit and 100% --- */
 stageElement.addEventListener("dblclick", () => {
-  if (Math.abs(viewerState.zoomScale - 1) < 0.001) {
-    fitImageToStage();
-  } else {
+  if (isInFittedState()) {
     showImageAtActualSize();
+  } else {
+    fitImageToStage();
   }
 });
 
@@ -582,10 +610,8 @@ window.addEventListener("keydown", (keyEvent) => {
   }
 });
 
-/* --- Keep the image sensibly placed when the window resizes --- */
-window.addEventListener("resize", () => {
-  if (viewerState.hasImage) fitImageToStage();
-});
+/* --- Window resize: refresh the zoom readout; CSS keeps the image centered. --- */
+window.addEventListener("resize", updateZoomLabel);
 </script>
 </body>
 </html>
