@@ -67,9 +67,18 @@ one existed) and deletes `%LOCALAPPDATA%\SvgPreview`.
 ```
 src/SvgViewer/              WPF host + WebView2 viewer (Assets/viewer.html is the UI)
 src/SvgThumbnailProvider/   COM thumbnail handler (IThumbnailProvider + IInitializeWithStream)
+tools/IconGenerator/        Renders assets/app-icon.svg into the multi-size .ico
+assets/app-icon.svg         App logo (source of truth for the icon)
 scripts/install.ps1         Build, deploy to %LOCALAPPDATA%, register (HKCU)
 scripts/uninstall.ps1       Unregister and remove
+scripts/set-default-viewer.ps1  Clear a stale .svg association claimed by a browser
 samples/                    Test SVGs
+```
+
+To regenerate the app icon after editing the logo:
+
+```powershell
+dotnet run --project tools\IconGenerator -c Release -- assets\app-icon.svg src\SvgViewer\Assets\app-icon.ico
 ```
 
 ## How the thumbnail handler works

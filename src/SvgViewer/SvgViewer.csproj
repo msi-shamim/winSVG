@@ -11,6 +11,9 @@
     <AssemblyName>SvgViewer</AssemblyName>
     <RootNamespace>SvgViewer</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- App logo embedded in the exe: window title bar, taskbar, Open With
+         dialog, and Default Apps all pick it up from here. -->
+    <ApplicationIcon>Assets\app-icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

@@ -92,7 +92,7 @@ $progIdKeyPath = "$classesRoot\$svgProgId"
 New-Item -Path "$progIdKeyPath\shell\open\command" -Force | Out-Null
 New-Item -Path "$progIdKeyPath\DefaultIcon" -Force | Out-Null
 Set-ItemProperty -Path $progIdKeyPath -Name '(default)' -Value 'Scalable Vector Graphics image'
-Set-ItemProperty -Path "$progIdKeyPath\DefaultIcon" -Name '(default)' -Value '%SystemRoot%\System32\imageres.dll,-72'
+Set-ItemProperty -Path "$progIdKeyPath\DefaultIcon" -Name '(default)' -Value "$viewerExecutablePath,0"
 Set-ItemProperty -Path "$progIdKeyPath\shell\open\command" -Name '(default)' -Value "`"$viewerExecutablePath`" `"%1`""
 
 # Remember the previous default ProgId so uninstall can restore it.

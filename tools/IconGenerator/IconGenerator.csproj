@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>IconGenerator</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Same SVG rasterizer the thumbnail provider uses, so the icon matches
+         what Explorer thumbnails will look like. -->
+    <PackageReference Include="Svg.Skia" Version="2.*" />
+  </ItemGroup>
+
+</Project>
