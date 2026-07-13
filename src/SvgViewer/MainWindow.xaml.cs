@@ -131,6 +131,9 @@ public partial class MainWindow : Window
             case "openFileDialog":
                 await PromptForFileAsync();
                 break;
+            case "imageLoadFailed":
+                await ShowCurrentFileAsDataUriAsync();
+                break;
             case "closeWindow":
                 Close();
                 break;
@@ -231,5 +234,40 @@ public partial class MainWindow : Window
             $"{_currentFileIndex + 1}, {_svgFilePathsInFolder.Count});";
 
         await SvgWebView.CoreWebView2.ExecuteScriptAsync(showFileScript);
+    }
+
+    /// <summary>
+    /// Fallback display path: reads the current SVG file directly and hands it
+    /// to the viewer page as a base64 data: URI. Used when the virtual-host
+    /// URL load fails (e.g. unusual file names or resource-loading quirks),
+    /// since a data: URI cannot fail to fetch.
+    /// </summary>
+    private async Task ShowCurrentFileAsDataUriAsync()
+    {
+        if (!_isViewerPageReady || _currentFileIndex < 0 || _currentFileIndex >= _svgFilePathsInFolder.Count)
+        {
+            return;
+        }
+
+        string currentFilePath = _svgFilePathsInFolder[_currentFileIndex];
+        string currentFileName = Path.GetFileName(currentFilePath);
+
+        byte[] svgFileBytes;
+        try
+        {
+            svgFileBytes = await File.ReadAllBytesAsync(currentFilePath);
+        }
+        catch (IOException)
+        {
+            return;
+        }
+
+        string svgDataUri = "data:image/svg+xml;base64," + Convert.ToBase64String(svgFileBytes);
+
+        string fallbackScript =
+            $"showFile({JsonSerializer.Serialize(svgDataUri)}, {JsonSerializer.Serialize(currentFileName)}, " +
+            $"{_currentFileIndex + 1}, {_svgFilePathsInFolder.Count}, true);";
+
+        await SvgWebView.CoreWebView2.ExecuteScriptAsync(fallbackScript);
     }
 }

@@ -216,12 +216,14 @@ function zoomAroundPoint(zoomFactor, anchorX, anchorY) {
 /**
  * Loads a new SVG file into the viewer. Invoked by the C# host through
  * ExecuteScriptAsync whenever the current file changes.
- * @param {string} svgFileUrl - Virtual-host URL of the SVG file.
+ * @param {string} imageSource - Virtual-host URL or data: URI of the SVG.
  * @param {string} displayFileName - File name shown in the toolbar.
  * @param {number} positionInFolder - 1-based index among sibling SVG files.
  * @param {number} totalInFolder - Total count of sibling SVG files.
+ * @param {boolean} [isFallbackAttempt] - True when the host re-sent the file
+ *   as a data: URI after the URL-based load failed; suppresses further retry.
  */
-function showFile(svgFileUrl, displayFileName, positionInFolder, totalInFolder) {
+function showFile(imageSource, displayFileName, positionInFolder, totalInFolder, isFallbackAttempt) {
   fileLabelElement.textContent = displayFileName;
   fileLabelElement.title = displayFileName;
   positionLabelElement.textContent = `${positionInFolder}/${totalInFolder}`;
@@ -234,14 +236,21 @@ function showFile(svgFileUrl, displayFileName, positionInFolder, totalInFolder) 
     svgImageElement.style.display = "block";
     emptyHintElement.style.display = "none";
     fitImageToStage();
+    // Refit on the next frame in case the window/DPI layout settles after load.
+    requestAnimationFrame(fitImageToStage);
   };
   svgImageElement.onerror = () => {
+    if (!isFallbackAttempt) {
+      // Ask the C# host to re-send the file content as a data: URI.
+      postCommandToHost("imageLoadFailed");
+      return;
+    }
+    svgImageElement.style.display = "none";
     emptyHintElement.style.display = "flex";
     emptyHintElement.textContent = `Could not load ${displayFileName}`;
   };
 
-  // Cache-bust so edits to the same file show up when navigating back to it.
-  svgImageElement.src = `${svgFileUrl}?t=${Date.now()}`;
+  svgImageElement.src = imageSource;
 }
 
 /* --- Mouse wheel: zoom around the cursor --- */
