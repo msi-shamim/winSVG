@@ -12,7 +12,7 @@
     <SelfContained>false</SelfContained>
     <AssemblyName>SvgThumbnailProvider</AssemblyName>
     <RootNamespace>SvgThumbnailProvider</RootNamespace>
-    <Version>1.1.1</Version>
+    <Version>1.2.0</Version>
     <Product>winSVG</Product>
   </PropertyGroup>
 

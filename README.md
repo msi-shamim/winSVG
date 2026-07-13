@@ -44,6 +44,7 @@ uninstalls cleanly from *Settings → Apps → Installed apps*.
 | Folder navigation | `←`/`→` flips through every SVG in the folder |
 | Background toggle | `B` cycles white → checkerboard → black; preview opens with a background by default |
 | Export to image | `Ctrl+S` exports PNG / JPG / WebP at ×1, ×2, or ×4 scale, with white, black, or transparent background |
+| Crop | `C` opens a crop overlay with aspect presets — Free, 1:1, 16:9, 21:9, 9:16, 4:3, 3:4 — drag to move/resize, then export the cropped region razor-sharp at any scale |
 | Keyboard-first | `0` fit, `1` actual size, `Ctrl+O` open, `Esc` close |
 | File info | Name, pixel dimensions, and position in folder shown in the toolbar |
 | Open With / Default Apps | Registers properly so you can make it the default in one click |

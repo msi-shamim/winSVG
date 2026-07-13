@@ -140,6 +140,9 @@ public partial class MainWindow : Window
                 case "imageLoadFailed":
                     await ShowCurrentFileAsDataUriAsync();
                     break;
+                case "requestSvgData":
+                    await SendCurrentFileAsSvgDataAsync();
+                    break;
                 case "imageLoaded":
                     await RunAutomatedExportIfRequestedAsync();
                     break;
@@ -154,6 +157,32 @@ public partial class MainWindow : Window
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// Sends the current SVG file to the viewer page as a data: URI, used by
+    /// the crop feature to rasterize the artwork on an untainted canvas.
+    /// </summary>
+    private async Task SendCurrentFileAsSvgDataAsync()
+    {
+        if (_currentFileIndex < 0 || _currentFileIndex >= _svgFilePathsInFolder.Count)
+        {
+            return;
+        }
+
+        byte[] svgFileBytes;
+        try
+        {
+            svgFileBytes = await File.ReadAllBytesAsync(_svgFilePathsInFolder[_currentFileIndex]);
+        }
+        catch (IOException)
+        {
+            return;
+        }
+
+        string svgDataUri = "data:image/svg+xml;base64," + Convert.ToBase64String(svgFileBytes);
+        await SvgWebView.CoreWebView2.ExecuteScriptAsync(
+            $"receiveSvgData({JsonSerializer.Serialize(svgDataUri)});");
     }
 
     /// <summary>
@@ -289,6 +318,19 @@ public partial class MainWindow : Window
         }
 
         _automatedExportAlreadyTriggered = true;
+
+        // Optional crop rect for the automated test, as "x,y,width,height".
+        string? automatedCropSettings = Environment.GetEnvironmentVariable("WINSVG_TEST_CROP");
+        if (!string.IsNullOrEmpty(automatedCropSettings))
+        {
+            int[] cropParts = automatedCropSettings.Split(',').Select(int.Parse).ToArray();
+            if (cropParts.Length == 4)
+            {
+                await SvgWebView.CoreWebView2.ExecuteScriptAsync(
+                    $"cropState.applied = {{ x: {cropParts[0]}, y: {cropParts[1]}, " +
+                    $"width: {cropParts[2]}, height: {cropParts[3]} }};");
+            }
+        }
 
         using JsonDocument syntheticRequest = JsonDocument.Parse(JsonSerializer.Serialize(new
         {

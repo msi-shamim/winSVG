@@ -85,6 +85,76 @@
   #positionLabel { color: #9a9a9a; padding: 0 6px; }
   #dimensionsLabel { color: #9a9a9a; padding: 0 6px; }
 
+  /* --- Crop overlay --- */
+  #cropLayer {
+    position: absolute;
+    inset: 0;
+    display: none;
+    z-index: 5;
+    overflow: hidden;
+  }
+  #cropLayer.open { display: block; }
+  #cropBox {
+    position: absolute;
+    border: 1.5px solid var(--accent);
+    /* Huge box-shadow dims everything outside the crop rectangle. */
+    box-shadow: 0 0 0 100000px rgba(0, 0, 0, 0.55);
+    cursor: move;
+    box-sizing: border-box;
+  }
+  .cropHandle {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    background: #ffffff;
+    border: 2px solid var(--accent);
+    border-radius: 3px;
+    box-sizing: border-box;
+  }
+  .cropHandle[data-corner="nw"] { left: -8px;  top: -8px;    cursor: nwse-resize; }
+  .cropHandle[data-corner="ne"] { right: -8px; top: -8px;    cursor: nesw-resize; }
+  .cropHandle[data-corner="sw"] { left: -8px;  bottom: -8px; cursor: nesw-resize; }
+  .cropHandle[data-corner="se"] { right: -8px; bottom: -8px; cursor: nwse-resize; }
+  #cropBar {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--toolbar-bg);
+    color: var(--toolbar-fg);
+    border-radius: 10px;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+    font-size: 13px;
+    z-index: 6;
+    white-space: nowrap;
+  }
+  #cropSizeHint { color: #9a9a9a; min-width: 90px; text-align: center; }
+  #cropApplyButton {
+    background: var(--accent);
+    color: #10233f;
+    border: none;
+    border-radius: 7px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #cropApplyButton:hover { filter: brightness(1.1); }
+  #cropCancelButton {
+    background: rgba(255,255,255,0.1);
+    color: var(--toolbar-fg);
+    border: none;
+    border-radius: 7px;
+    padding: 6px 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  #cropCancelButton:hover { background: rgba(255,255,255,0.18); }
+
   /* --- Export panel --- */
   #exportPanel {
     position: absolute;
@@ -150,6 +220,29 @@
 
   <div id="emptyHint">Press Ctrl+O to open an SVG file</div>
 
+  <div id="cropLayer">
+    <div id="cropBox">
+      <div class="cropHandle" data-corner="nw"></div>
+      <div class="cropHandle" data-corner="ne"></div>
+      <div class="cropHandle" data-corner="sw"></div>
+      <div class="cropHandle" data-corner="se"></div>
+    </div>
+    <div id="cropBar">
+      <div class="segmented" id="cropAspectChoice">
+        <button data-ratio="free" class="active">Free</button>
+        <button data-ratio="1:1">1:1</button>
+        <button data-ratio="16:9">16:9</button>
+        <button data-ratio="21:9">21:9</button>
+        <button data-ratio="9:16">9:16</button>
+        <button data-ratio="4:3">4:3</button>
+        <button data-ratio="3:4">3:4</button>
+      </div>
+      <span id="cropSizeHint"></span>
+      <button id="cropApplyButton">✔ Apply</button>
+      <button id="cropCancelButton">✕ Cancel</button>
+    </div>
+  </div>
+
   <div id="exportPanel">
     <div class="exportRow">
       <span class="exportLabel">Format</span>
@@ -196,6 +289,7 @@
     <button id="actualSizeButton" title="Actual size (1)">1:1</button>
     <span class="divider"></span>
     <button id="backgroundButton" title="Cycle background (B)">▦ BG</button>
+    <button id="cropButton" title="Crop image (C)">⬚ Crop</button>
     <button id="exportButton" title="Export as image (Ctrl+S)">⭳ Export</button>
     <button id="openButton" title="Open file (Ctrl+O)">Open…</button>
   </div>
@@ -344,9 +438,22 @@ function showFile(imageSource, displayFileName, positionInFolder, totalInFolder,
   fileLabelElement.title = displayFileName;
   positionLabelElement.textContent = `${positionInFolder}/${totalInFolder}`;
 
+  // A new file discards any crop and cached SVG content from the previous one.
+  currentImageSource = imageSource;
+  cachedSvgDataUri = imageSource.startsWith("data:image/svg") ? imageSource : null;
+  discardCropState();
+
   svgImageElement.onload = () => {
-    viewerState.naturalWidth = svgImageElement.naturalWidth || 300;
-    viewerState.naturalHeight = svgImageElement.naturalHeight || 150;
+    if (pendingCropDisplaySize) {
+      // A cropped preview PNG just loaded (possibly rendered at devicePixelRatio):
+      // report the logical crop size, not the PNG's pixel size.
+      viewerState.naturalWidth = pendingCropDisplaySize.width;
+      viewerState.naturalHeight = pendingCropDisplaySize.height;
+      pendingCropDisplaySize = null;
+    } else {
+      viewerState.naturalWidth = svgImageElement.naturalWidth || 300;
+      viewerState.naturalHeight = svgImageElement.naturalHeight || 150;
+    }
     viewerState.hasImage = true;
     dimensionsLabelElement.textContent = `${viewerState.naturalWidth}×${viewerState.naturalHeight}`;
     svgImageElement.style.display = "block";
@@ -354,6 +461,10 @@ function showFile(imageSource, displayFileName, positionInFolder, totalInFolder,
     // Identity transform = CSS-fitted and centered; no measurement, no race.
     fitImageToStage();
     updateExportSizeHint();
+    if (reopenCropAfterRestore) {
+      reopenCropAfterRestore = false;
+      openCropOverlay();
+    }
     postCommandToHost("imageLoaded");
   };
   svgImageElement.onerror = () => {
@@ -413,6 +524,306 @@ stageElement.addEventListener("dblclick", () => {
     fitImageToStage();
   }
 });
+
+/* ================================= Crop ================================= */
+
+const cropLayerElement = document.getElementById("cropLayer");
+const cropBoxElement = document.getElementById("cropBox");
+const cropAspectChoiceElement = document.getElementById("cropAspectChoice");
+const cropSizeHintElement = document.getElementById("cropSizeHint");
+
+/**
+ * Crop state. rect is kept in the ORIGINAL image's natural pixel
+ * coordinates; `applied` holds the confirmed rect once the user hits Apply
+ * (used by both the cropped preview and the export pipeline).
+ */
+const cropState = {
+  overlayOpen: false,
+  aspectRatio: null,   // width/height number, or null for Free
+  rect: { x: 0, y: 0, width: 0, height: 0 },
+  applied: null,
+};
+
+const MIN_CROP_EDGE_PX = 8;
+
+/** Original source URL/data-URI of the file shown by showFile(). */
+let currentImageSource = null;
+/** The SVG content as a data: URI, cached after the first host round-trip. */
+let cachedSvgDataUri = null;
+/** True while waiting for SVG data to render the cropped preview. */
+let pendingCropPreview = false;
+/** Logical size metadata for a cropped preview PNG that is about to load. */
+let pendingCropDisplaySize = null;
+/** True when the crop overlay should reopen after restoring the original. */
+let reopenCropAfterRestore = false;
+
+/**
+ * Resets every crop-related bit of state; called when a new file is shown.
+ */
+function discardCropState() {
+  cropState.applied = null;
+  cropState.overlayOpen = false;
+  pendingCropPreview = false;
+  pendingCropDisplaySize = null;
+  cropLayerElement.classList.remove("open");
+  svgImageElement.style.width = "";
+}
+
+/**
+ * Entry point for the Crop button / C key. If a crop is already applied,
+ * the original image is restored first so cropping always starts from the
+ * full artwork.
+ */
+function enterCropMode() {
+  if (!viewerState.hasImage || cropState.overlayOpen) return;
+  exportPanelElement.classList.remove("open");
+
+  if (cropState.applied) {
+    reopenCropAfterRestore = true;
+    cropState.applied = null;
+    pendingCropDisplaySize = null;
+    svgImageElement.style.width = "";
+    svgImageElement.src = currentImageSource;
+    return;
+  }
+  openCropOverlay();
+}
+
+/**
+ * Opens the crop overlay with a full-image Free selection.
+ */
+function openCropOverlay() {
+  fitImageToStage();
+  cropState.overlayOpen = true;
+  cropState.aspectRatio = null;
+  cropState.rect = { x: 0, y: 0, width: viewerState.naturalWidth, height: viewerState.naturalHeight };
+  cropAspectChoiceElement.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+  cropAspectChoiceElement.querySelector('button[data-ratio="free"]').classList.add("active");
+  cropLayerElement.classList.add("open");
+  layoutCropOverlay();
+}
+
+/**
+ * Closes the crop overlay without applying.
+ */
+function cancelCropOverlay() {
+  cropState.overlayOpen = false;
+  cropLayerElement.classList.remove("open");
+}
+
+/**
+ * Positions the on-screen crop box to match cropState.rect, converting from
+ * natural image coordinates to stage coordinates via the rendered image rect.
+ */
+function layoutCropOverlay() {
+  if (!cropState.overlayOpen) return;
+  const imageRect = svgImageElement.getBoundingClientRect();
+  const stageRect = stageElement.getBoundingClientRect();
+  const pixelsPerNaturalUnit = imageRect.width / viewerState.naturalWidth;
+
+  cropBoxElement.style.left = `${imageRect.left - stageRect.left + cropState.rect.x * pixelsPerNaturalUnit}px`;
+  cropBoxElement.style.top = `${imageRect.top - stageRect.top + cropState.rect.y * pixelsPerNaturalUnit}px`;
+  cropBoxElement.style.width = `${cropState.rect.width * pixelsPerNaturalUnit}px`;
+  cropBoxElement.style.height = `${cropState.rect.height * pixelsPerNaturalUnit}px`;
+
+  cropSizeHintElement.textContent =
+    `${Math.round(cropState.rect.width)}×${Math.round(cropState.rect.height)} px`;
+}
+
+/**
+ * Reshapes the current selection to the chosen aspect ratio: the largest
+ * rect of that ratio that fits the image, centered on the previous selection.
+ * @param {string} ratioValue - "free" or "W:H" such as "16:9".
+ */
+function setCropAspect(ratioValue) {
+  if (ratioValue === "free") {
+    cropState.aspectRatio = null;
+    layoutCropOverlay();
+    return;
+  }
+
+  const [ratioWidth, ratioHeight] = ratioValue.split(":").map(Number);
+  const targetRatio = ratioWidth / ratioHeight;
+  cropState.aspectRatio = targetRatio;
+
+  const imageWidth = viewerState.naturalWidth;
+  const imageHeight = viewerState.naturalHeight;
+  let newWidth = Math.min(imageWidth, imageHeight * targetRatio);
+  let newHeight = newWidth / targetRatio;
+
+  const previousCenterX = cropState.rect.x + cropState.rect.width / 2;
+  const previousCenterY = cropState.rect.y + cropState.rect.height / 2;
+
+  cropState.rect = {
+    x: Math.min(Math.max(previousCenterX - newWidth / 2, 0), imageWidth - newWidth),
+    y: Math.min(Math.max(previousCenterY - newHeight / 2, 0), imageHeight - newHeight),
+    width: newWidth,
+    height: newHeight,
+  };
+  layoutCropOverlay();
+}
+
+/* --- Crop box dragging: move the box, or resize from a corner handle --- */
+
+/** Active drag descriptor, or null when not dragging. */
+let cropDragOperation = null;
+
+cropBoxElement.addEventListener("pointerdown", (pointerEvent) => {
+  if (pointerEvent.button !== 0) return;
+  pointerEvent.stopPropagation();
+
+  const grabbedCorner = pointerEvent.target.dataset ? pointerEvent.target.dataset.corner : undefined;
+  cropDragOperation = {
+    mode: grabbedCorner ? "resize" : "move",
+    corner: grabbedCorner || null,
+    startPointerX: pointerEvent.clientX,
+    startPointerY: pointerEvent.clientY,
+    startRect: { ...cropState.rect },
+  };
+  cropBoxElement.setPointerCapture(pointerEvent.pointerId);
+});
+
+cropBoxElement.addEventListener("pointermove", (pointerEvent) => {
+  if (!cropDragOperation) return;
+
+  const imageRect = svgImageElement.getBoundingClientRect();
+  const pixelsPerNaturalUnit = imageRect.width / viewerState.naturalWidth;
+  const imageWidth = viewerState.naturalWidth;
+  const imageHeight = viewerState.naturalHeight;
+
+  if (cropDragOperation.mode === "move") {
+    const deltaX = (pointerEvent.clientX - cropDragOperation.startPointerX) / pixelsPerNaturalUnit;
+    const deltaY = (pointerEvent.clientY - cropDragOperation.startPointerY) / pixelsPerNaturalUnit;
+    cropState.rect.x = Math.min(Math.max(cropDragOperation.startRect.x + deltaX, 0), imageWidth - cropState.rect.width);
+    cropState.rect.y = Math.min(Math.max(cropDragOperation.startRect.y + deltaY, 0), imageHeight - cropState.rect.height);
+    layoutCropOverlay();
+    return;
+  }
+
+  // Resize: the corner opposite the grabbed one stays anchored.
+  const startRect = cropDragOperation.startRect;
+  const anchorX = cropDragOperation.corner.includes("w") ? startRect.x + startRect.width : startRect.x;
+  const anchorY = cropDragOperation.corner.includes("n") ? startRect.y + startRect.height : startRect.y;
+
+  // Pointer position in natural coordinates, clamped to the image.
+  const pointerNaturalX = Math.min(Math.max((pointerEvent.clientX - imageRect.left) / pixelsPerNaturalUnit, 0), imageWidth);
+  const pointerNaturalY = Math.min(Math.max((pointerEvent.clientY - imageRect.top) / pixelsPerNaturalUnit, 0), imageHeight);
+
+  let newWidth;
+  let newHeight;
+  const horizontalSign = pointerNaturalX >= anchorX ? 1 : -1;
+  const verticalSign = pointerNaturalY >= anchorY ? 1 : -1;
+
+  if (cropState.aspectRatio === null) {
+    newWidth = Math.max(Math.abs(pointerNaturalX - anchorX), MIN_CROP_EDGE_PX);
+    newHeight = Math.max(Math.abs(pointerNaturalY - anchorY), MIN_CROP_EDGE_PX);
+  } else {
+    // Follow the dominant pointer axis, then constrain to the locked ratio
+    // and to the space available on the pointer's side of the anchor.
+    const ratio = cropState.aspectRatio;
+    newWidth = Math.max(Math.abs(pointerNaturalX - anchorX), Math.abs(pointerNaturalY - anchorY) * ratio, MIN_CROP_EDGE_PX);
+    const availableWidth = horizontalSign > 0 ? imageWidth - anchorX : anchorX;
+    const availableHeight = verticalSign > 0 ? imageHeight - anchorY : anchorY;
+    newWidth = Math.min(newWidth, availableWidth, availableHeight * ratio);
+    newHeight = newWidth / ratio;
+  }
+
+  const newX = horizontalSign > 0 ? anchorX : anchorX - newWidth;
+  const newY = verticalSign > 0 ? anchorY : anchorY - newHeight;
+
+  cropState.rect = {
+    x: Math.min(Math.max(newX, 0), imageWidth),
+    y: Math.min(Math.max(newY, 0), imageHeight),
+    width: Math.min(newWidth, imageWidth),
+    height: Math.min(newHeight, imageHeight),
+  };
+  layoutCropOverlay();
+});
+
+cropBoxElement.addEventListener("pointerup", () => { cropDragOperation = null; });
+
+/**
+ * Confirms the current selection: stores it, closes the overlay, and renders
+ * the cropped preview (fetching the SVG content from the host if not cached).
+ */
+function applyCrop() {
+  const confirmedRect = {
+    x: Math.max(0, Math.round(cropState.rect.x)),
+    y: Math.max(0, Math.round(cropState.rect.y)),
+    width: Math.max(1, Math.round(cropState.rect.width)),
+    height: Math.max(1, Math.round(cropState.rect.height)),
+  };
+  cancelCropOverlay();
+  cropState.applied = confirmedRect;
+  pendingCropPreview = true;
+
+  if (cachedSvgDataUri) {
+    renderCroppedPreview();
+  } else {
+    postCommandToHost("requestSvgData");
+  }
+}
+
+/**
+ * Receives the SVG content from the C# host (as a data: URI) and continues
+ * any operation that was waiting on it. Invoked via ExecuteScriptAsync.
+ * @param {string} svgDataUri - The current file's content as a data: URI.
+ */
+function receiveSvgData(svgDataUri) {
+  cachedSvgDataUri = svgDataUri;
+  if (pendingCropPreview) {
+    renderCroppedPreview();
+  }
+}
+
+/**
+ * Rasterizes the applied crop region from the original vector at the display
+ * pixel ratio and swaps it into the preview image.
+ */
+function renderCroppedPreview() {
+  pendingCropPreview = false;
+  const appliedRect = cropState.applied;
+  if (!appliedRect || !cachedSvgDataUri) return;
+
+  const previewPixelRatio = Math.min(window.devicePixelRatio || 1, 3);
+  const offscreenImage = new Image();
+
+  offscreenImage.onload = () => {
+    const sourceWidth = offscreenImage.naturalWidth || 300;
+    const sourceHeight = offscreenImage.naturalHeight || 150;
+
+    const previewCanvas = document.createElement("canvas");
+    previewCanvas.width = Math.max(1, Math.round(appliedRect.width * previewPixelRatio));
+    previewCanvas.height = Math.max(1, Math.round(appliedRect.height * previewPixelRatio));
+    const canvasContext = previewCanvas.getContext("2d");
+
+    // Draw the whole vector scaled, positioned so the crop region lands in view.
+    canvasContext.drawImage(
+      offscreenImage,
+      -appliedRect.x * previewPixelRatio,
+      -appliedRect.y * previewPixelRatio,
+      sourceWidth * previewPixelRatio,
+      sourceHeight * previewPixelRatio);
+
+    // Present the PNG at the crop's logical size, not its device-pixel size.
+    pendingCropDisplaySize = { width: appliedRect.width, height: appliedRect.height };
+    svgImageElement.style.width = `${appliedRect.width}px`;
+    svgImageElement.src = previewCanvas.toDataURL("image/png");
+  };
+
+  offscreenImage.src = cachedSvgDataUri;
+}
+
+cropAspectChoiceElement.querySelectorAll("button").forEach((ratioButton) => {
+  ratioButton.addEventListener("click", () => {
+    cropAspectChoiceElement.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+    ratioButton.classList.add("active");
+    setCropAspect(ratioButton.dataset.ratio);
+  });
+});
+document.getElementById("cropButton").addEventListener("click", enterCropMode);
+document.getElementById("cropApplyButton").addEventListener("click", applyCrop);
+document.getElementById("cropCancelButton").addEventListener("click", cancelCropOverlay);
 
 /* ================================ Export ================================ */
 
@@ -518,8 +929,13 @@ function performExport(svgDataUri, exportFormat, exportScale, exportBackground, 
   const offscreenImage = new Image();
 
   offscreenImage.onload = () => {
-    const outputWidth = Math.max(1, Math.round((offscreenImage.naturalWidth || 300) * exportScale));
-    const outputHeight = Math.max(1, Math.round((offscreenImage.naturalHeight || 150) * exportScale));
+    const sourceWidth = offscreenImage.naturalWidth || 300;
+    const sourceHeight = offscreenImage.naturalHeight || 150;
+
+    // When a crop is applied, export just that region of the artwork.
+    const cropRegion = cropState.applied || { x: 0, y: 0, width: sourceWidth, height: sourceHeight };
+    const outputWidth = Math.max(1, Math.round(cropRegion.width * exportScale));
+    const outputHeight = Math.max(1, Math.round(cropRegion.height * exportScale));
 
     const exportCanvas = document.createElement("canvas");
     exportCanvas.width = outputWidth;
@@ -533,20 +949,26 @@ function performExport(svgDataUri, exportFormat, exportScale, exportBackground, 
       canvasContext.fillRect(0, 0, outputWidth, outputHeight);
     }
 
-    // Chromium re-rasterizes the SVG at the target resolution, so scaled
-    // exports stay perfectly sharp.
-    canvasContext.drawImage(offscreenImage, 0, 0, outputWidth, outputHeight);
+    // Draw the whole vector scaled to the target resolution, offset so the
+    // crop region fills the canvas — scaled exports stay perfectly sharp.
+    canvasContext.drawImage(
+      offscreenImage,
+      -cropRegion.x * exportScale,
+      -cropRegion.y * exportScale,
+      sourceWidth * exportScale,
+      sourceHeight * exportScale);
 
     const mimeTypeByFormat = { png: "image/png", jpeg: "image/jpeg", webp: "image/webp" };
     const encodedDataUrl = exportCanvas.toDataURL(mimeTypeByFormat[exportFormat], 0.95);
 
     const fileExtension = exportFormat === "jpeg" ? "jpg" : exportFormat;
     const scaleSuffix = exportScale > 1 ? `@${exportScale}x` : "";
+    const cropSuffix = cropState.applied ? "-crop" : "";
 
     postMessageToHost({
       command: "saveExportedImage",
       dataUrl: encodedDataUrl,
-      suggestedFileName: `${baseFileName}${scaleSuffix}.${fileExtension}`,
+      suggestedFileName: `${baseFileName}${cropSuffix}${scaleSuffix}.${fileExtension}`,
     });
   };
 
@@ -584,6 +1006,12 @@ document.getElementById("zoomOutButton").addEventListener("click", () =>
 
 /* --- Keyboard shortcuts --- */
 window.addEventListener("keydown", (keyEvent) => {
+  // While the crop overlay is open, only Enter (apply) and Escape (cancel) act.
+  if (cropState.overlayOpen) {
+    if (keyEvent.key === "Enter") { keyEvent.preventDefault(); applyCrop(); }
+    if (keyEvent.key === "Escape") { keyEvent.preventDefault(); cancelCropOverlay(); }
+    return;
+  }
   if (keyEvent.ctrlKey && keyEvent.key.toLowerCase() === "o") {
     keyEvent.preventDefault();
     postCommandToHost("openFileDialog");
@@ -606,12 +1034,16 @@ window.addEventListener("keydown", (keyEvent) => {
     case "0": fitImageToStage(); break;
     case "1": showImageAtActualSize(); break;
     case "b": case "B": cycleBackground(); break;
+    case "c": case "C": enterCropMode(); break;
     case "Escape": postCommandToHost("closeWindow"); break;
   }
 });
 
-/* --- Window resize: refresh the zoom readout; CSS keeps the image centered. --- */
-window.addEventListener("resize", updateZoomLabel);
+/* --- Window resize: CSS keeps the image centered; refresh dependent UI. --- */
+window.addEventListener("resize", () => {
+  updateZoomLabel();
+  layoutCropOverlay();
+});
 </script>
 </body>
 </html>
