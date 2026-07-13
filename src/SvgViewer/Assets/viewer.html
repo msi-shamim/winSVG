@@ -12,7 +12,8 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; }
 
-  /* --- Stage backgrounds (cycled with the B key / button) --- */
+  /* --- Stage backgrounds (cycled with the B key / button).
+         White ("with background") is the default preview mode. --- */
   body.bg-checker {
     background-color: #ffffff;
     background-image:
@@ -72,6 +73,51 @@
   #positionLabel { color: #9a9a9a; padding: 0 6px; }
   #dimensionsLabel { color: #9a9a9a; padding: 0 6px; }
 
+  /* --- Export panel --- */
+  #exportPanel {
+    position: absolute;
+    left: 50%;
+    bottom: 66px;
+    transform: translateX(-50%);
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 16px;
+    background: var(--toolbar-bg);
+    color: var(--toolbar-fg);
+    border-radius: 10px;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+    font-size: 13px;
+    z-index: 11;
+  }
+  #exportPanel.open { display: flex; }
+  .exportRow { display: flex; align-items: center; gap: 10px; }
+  .exportLabel { width: 84px; color: #b8b8b8; }
+  .segmented { display: flex; gap: 2px; background: rgba(255,255,255,0.08); border-radius: 7px; padding: 2px; }
+  .segmented button {
+    background: transparent;
+    color: var(--toolbar-fg);
+    border: none;
+    border-radius: 5px;
+    padding: 4px 12px;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  .segmented button.active { background: var(--accent); color: #10233f; font-weight: 600; }
+  .segmented button:disabled { opacity: 0.35; cursor: default; }
+  #exportSizeHint { color: #9a9a9a; flex: 1; }
+  #downloadButton {
+    background: var(--accent);
+    color: #10233f;
+    border: none;
+    border-radius: 7px;
+    padding: 7px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #downloadButton:hover { filter: brightness(1.1); }
+
   /* --- Empty-state hint shown before any file is loaded --- */
   #emptyHint {
     position: absolute;
@@ -85,12 +131,43 @@
   }
 </style>
 </head>
-<body class="bg-checker">
+<body class="bg-white">
   <div id="stage">
     <img id="svgImage" alt="SVG preview">
   </div>
 
   <div id="emptyHint">Press Ctrl+O to open an SVG file</div>
+
+  <div id="exportPanel">
+    <div class="exportRow">
+      <span class="exportLabel">Format</span>
+      <div class="segmented" id="formatChoice">
+        <button data-value="png" class="active">PNG</button>
+        <button data-value="jpeg">JPG</button>
+        <button data-value="webp">WebP</button>
+      </div>
+    </div>
+    <div class="exportRow">
+      <span class="exportLabel">Background</span>
+      <div class="segmented" id="backgroundChoice">
+        <button data-value="white" class="active">White</button>
+        <button data-value="black">Black</button>
+        <button data-value="transparent">Transparent</button>
+      </div>
+    </div>
+    <div class="exportRow">
+      <span class="exportLabel">Scale</span>
+      <div class="segmented" id="scaleChoice">
+        <button data-value="1" class="active">×1</button>
+        <button data-value="2">×2</button>
+        <button data-value="4">×4</button>
+      </div>
+    </div>
+    <div class="exportRow">
+      <span id="exportSizeHint"></span>
+      <button id="downloadButton">Download</button>
+    </div>
+  </div>
 
   <div id="toolbar">
     <button id="prevButton" title="Previous file (←)">◀</button>
@@ -107,6 +184,7 @@
     <button id="actualSizeButton" title="Actual size (1)">1:1</button>
     <span class="divider"></span>
     <button id="backgroundButton" title="Cycle background (B)">▦ BG</button>
+    <button id="exportButton" title="Export as image (Ctrl+S)">⭳ Export</button>
     <button id="openButton" title="Open file (Ctrl+O)">Open…</button>
   </div>
 
@@ -128,7 +206,8 @@ const viewerState = {
 
 const MIN_ZOOM_SCALE = 0.02;
 const MAX_ZOOM_SCALE = 64;
-const BACKGROUND_CLASSES = ["bg-checker", "bg-white", "bg-black"];
+// White first: "with background" is the default preview mode.
+const BACKGROUND_CLASSES = ["bg-white", "bg-checker", "bg-black"];
 let activeBackgroundIndex = 0;
 
 const stageElement = document.getElementById("stage");
@@ -140,13 +219,21 @@ const dimensionsLabelElement = document.getElementById("dimensionsLabel");
 const zoomLabelElement = document.getElementById("zoomLabel");
 
 /**
- * Posts a command message to the C# host window.
+ * Posts a message object to the C# host window.
+ * @param {object} messagePayload - Message with a "command" property understood by MainWindow.
+ */
+function postMessageToHost(messagePayload) {
+  if (window.chrome && window.chrome.webview) {
+    window.chrome.webview.postMessage(messagePayload);
+  }
+}
+
+/**
+ * Posts a simple command (no extra data) to the C# host window.
  * @param {string} commandName - Command identifier understood by MainWindow.
  */
 function postCommandToHost(commandName) {
-  if (window.chrome && window.chrome.webview) {
-    window.chrome.webview.postMessage({ command: commandName });
-  }
+  postMessageToHost({ command: commandName });
 }
 
 /**
@@ -238,6 +325,8 @@ function showFile(imageSource, displayFileName, positionInFolder, totalInFolder,
     fitImageToStage();
     // Refit on the next frame in case the window/DPI layout settles after load.
     requestAnimationFrame(fitImageToStage);
+    updateExportSizeHint();
+    postCommandToHost("imageLoaded");
   };
   svgImageElement.onerror = () => {
     if (!isFallbackAttempt) {
@@ -297,8 +386,155 @@ stageElement.addEventListener("dblclick", () => {
   }
 });
 
+/* ================================ Export ================================ */
+
+const exportPanelElement = document.getElementById("exportPanel");
+const formatChoiceElement = document.getElementById("formatChoice");
+const backgroundChoiceElement = document.getElementById("backgroundChoice");
+const scaleChoiceElement = document.getElementById("scaleChoice");
+const exportSizeHintElement = document.getElementById("exportSizeHint");
+
 /**
- * Advances to the next background style (checkerboard → white → black).
+ * Returns the data-value of the active button in a segmented control.
+ * @param {HTMLElement} segmentedGroup - The segmented control container.
+ */
+function getSelectedSegmentValue(segmentedGroup) {
+  return segmentedGroup.querySelector("button.active").dataset.value;
+}
+
+/**
+ * Wires a segmented control so clicking a button makes it the single active
+ * choice, then runs the shared post-change updates.
+ * @param {HTMLElement} segmentedGroup - The segmented control container.
+ */
+function wireSegmentedControl(segmentedGroup) {
+  segmentedGroup.querySelectorAll("button").forEach((choiceButton) => {
+    choiceButton.addEventListener("click", () => {
+      if (choiceButton.disabled) return;
+      segmentedGroup.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+      choiceButton.classList.add("active");
+      onExportOptionsChanged();
+    });
+  });
+}
+
+/**
+ * Keeps export options consistent: JPEG cannot store transparency, so the
+ * Transparent choice is disabled (falling back to White) while JPG is
+ * selected. Also refreshes the output-size hint.
+ */
+function onExportOptionsChanged() {
+  const selectedFormat = getSelectedSegmentValue(formatChoiceElement);
+  const transparentButton = backgroundChoiceElement.querySelector('button[data-value="transparent"]');
+
+  if (selectedFormat === "jpeg") {
+    transparentButton.disabled = true;
+    if (transparentButton.classList.contains("active")) {
+      transparentButton.classList.remove("active");
+      backgroundChoiceElement.querySelector('button[data-value="white"]').classList.add("active");
+    }
+  } else {
+    transparentButton.disabled = false;
+  }
+  updateExportSizeHint();
+}
+
+/**
+ * Shows the pixel dimensions the current export settings would produce.
+ */
+function updateExportSizeHint() {
+  if (!viewerState.hasImage) {
+    exportSizeHintElement.textContent = "";
+    return;
+  }
+  const exportScale = Number(getSelectedSegmentValue(scaleChoiceElement));
+  exportSizeHintElement.textContent =
+    `Output: ${Math.round(viewerState.naturalWidth * exportScale)}×${Math.round(viewerState.naturalHeight * exportScale)} px`;
+}
+
+/**
+ * Shows or hides the export panel.
+ */
+function toggleExportPanel() {
+  if (!viewerState.hasImage) return;
+  exportPanelElement.classList.toggle("open");
+  updateExportSizeHint();
+}
+
+/**
+ * Kicks off an export with the currently selected options. The C# host
+ * responds by calling performExport() with the SVG content as a data: URI
+ * (which keeps the canvas untainted regardless of origin rules).
+ */
+function requestExport() {
+  if (!viewerState.hasImage) return;
+  postMessageToHost({
+    command: "exportImage",
+    format: getSelectedSegmentValue(formatChoiceElement),
+    background: getSelectedSegmentValue(backgroundChoiceElement),
+    scale: Number(getSelectedSegmentValue(scaleChoiceElement)),
+  });
+}
+
+/**
+ * Renders the SVG onto an offscreen canvas at the requested scale and
+ * background, encodes it in the chosen format, and sends the result back to
+ * the C# host to be saved. Invoked by the host via ExecuteScriptAsync.
+ * @param {string} svgDataUri - The SVG content as a data: URI.
+ * @param {string} exportFormat - "png", "jpeg" or "webp".
+ * @param {number} exportScale - Output multiplier (1, 2 or 4).
+ * @param {string} exportBackground - "white", "black" or "transparent".
+ * @param {string} baseFileName - Source file name without extension.
+ */
+function performExport(svgDataUri, exportFormat, exportScale, exportBackground, baseFileName) {
+  const offscreenImage = new Image();
+
+  offscreenImage.onload = () => {
+    const outputWidth = Math.max(1, Math.round((offscreenImage.naturalWidth || 300) * exportScale));
+    const outputHeight = Math.max(1, Math.round((offscreenImage.naturalHeight || 150) * exportScale));
+
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = outputWidth;
+    exportCanvas.height = outputHeight;
+    const canvasContext = exportCanvas.getContext("2d");
+
+    // JPEG has no alpha channel, so it always gets a solid background.
+    const needsSolidBackground = exportBackground !== "transparent" || exportFormat === "jpeg";
+    if (needsSolidBackground) {
+      canvasContext.fillStyle = exportBackground === "black" ? "#000000" : "#ffffff";
+      canvasContext.fillRect(0, 0, outputWidth, outputHeight);
+    }
+
+    // Chromium re-rasterizes the SVG at the target resolution, so scaled
+    // exports stay perfectly sharp.
+    canvasContext.drawImage(offscreenImage, 0, 0, outputWidth, outputHeight);
+
+    const mimeTypeByFormat = { png: "image/png", jpeg: "image/jpeg", webp: "image/webp" };
+    const encodedDataUrl = exportCanvas.toDataURL(mimeTypeByFormat[exportFormat], 0.95);
+
+    const fileExtension = exportFormat === "jpeg" ? "jpg" : exportFormat;
+    const scaleSuffix = exportScale > 1 ? `@${exportScale}x` : "";
+
+    postMessageToHost({
+      command: "saveExportedImage",
+      dataUrl: encodedDataUrl,
+      suggestedFileName: `${baseFileName}${scaleSuffix}.${fileExtension}`,
+    });
+  };
+
+  offscreenImage.src = svgDataUri;
+}
+
+wireSegmentedControl(formatChoiceElement);
+wireSegmentedControl(backgroundChoiceElement);
+wireSegmentedControl(scaleChoiceElement);
+document.getElementById("exportButton").addEventListener("click", toggleExportPanel);
+document.getElementById("downloadButton").addEventListener("click", requestExport);
+
+/* ============================== Background ============================== */
+
+/**
+ * Advances to the next background style (white → checkerboard → black).
  */
 function cycleBackground() {
   document.body.classList.remove(BACKGROUND_CLASSES[activeBackgroundIndex]);
@@ -323,6 +559,15 @@ window.addEventListener("keydown", (keyEvent) => {
   if (keyEvent.ctrlKey && keyEvent.key.toLowerCase() === "o") {
     keyEvent.preventDefault();
     postCommandToHost("openFileDialog");
+    return;
+  }
+  if (keyEvent.ctrlKey && keyEvent.key.toLowerCase() === "s") {
+    keyEvent.preventDefault();
+    toggleExportPanel();
+    return;
+  }
+  if (keyEvent.key === "Escape" && exportPanelElement.classList.contains("open")) {
+    exportPanelElement.classList.remove("open");
     return;
   }
   switch (keyEvent.key) {

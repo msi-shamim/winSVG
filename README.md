@@ -42,7 +42,8 @@ uninstalls cleanly from *Settings → Apps → Installed apps*.
 | Double-click viewer | Chromium-quality SVG rendering via WebView2 |
 | Zoom & pan | Mouse-wheel zoom around the cursor, drag to pan, `+`/`-`, double-click toggles fit ↔ 100% |
 | Folder navigation | `←`/`→` flips through every SVG in the folder |
-| Background toggle | `B` cycles checkerboard → white → black (great for white/transparent icons) |
+| Background toggle | `B` cycles white → checkerboard → black; preview opens with a background by default |
+| Export to image | `Ctrl+S` exports PNG / JPG / WebP at ×1, ×2, or ×4 scale, with white, black, or transparent background |
 | Keyboard-first | `0` fit, `1` actual size, `Ctrl+O` open, `Esc` close |
 | File info | Name, pixel dimensions, and position in folder shown in the toolbar |
 | Open With / Default Apps | Registers properly so you can make it the default in one click |

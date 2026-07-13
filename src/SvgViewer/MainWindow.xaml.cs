@@ -109,35 +109,196 @@ public partial class MainWindow : Window
     /// <param name="messageArgs">The posted JSON message.</param>
     private async void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs messageArgs)
     {
-        string commandName;
+        JsonDocument messageDocument;
         try
         {
-            using JsonDocument messageDocument = JsonDocument.Parse(messageArgs.WebMessageAsJson);
-            commandName = messageDocument.RootElement.GetProperty("command").GetString() ?? string.Empty;
+            messageDocument = JsonDocument.Parse(messageArgs.WebMessageAsJson);
         }
         catch (JsonException)
         {
             return;
         }
 
-        switch (commandName)
+        using (messageDocument)
         {
-            case "navigatePrevious":
-                await NavigateSiblingFileAsync(-1);
-                break;
-            case "navigateNext":
-                await NavigateSiblingFileAsync(+1);
-                break;
-            case "openFileDialog":
-                await PromptForFileAsync();
-                break;
-            case "imageLoadFailed":
-                await ShowCurrentFileAsDataUriAsync();
-                break;
-            case "closeWindow":
-                Close();
-                break;
+            JsonElement messageRoot = messageDocument.RootElement;
+            string commandName = messageRoot.TryGetProperty("command", out JsonElement commandElement)
+                ? commandElement.GetString() ?? string.Empty
+                : string.Empty;
+
+            switch (commandName)
+            {
+                case "navigatePrevious":
+                    await NavigateSiblingFileAsync(-1);
+                    break;
+                case "navigateNext":
+                    await NavigateSiblingFileAsync(+1);
+                    break;
+                case "openFileDialog":
+                    await PromptForFileAsync();
+                    break;
+                case "imageLoadFailed":
+                    await ShowCurrentFileAsDataUriAsync();
+                    break;
+                case "imageLoaded":
+                    await RunAutomatedExportIfRequestedAsync();
+                    break;
+                case "exportImage":
+                    await BeginExportAsync(messageRoot);
+                    break;
+                case "saveExportedImage":
+                    SaveExportedImage(messageRoot);
+                    break;
+                case "closeWindow":
+                    Close();
+                    break;
+            }
         }
+    }
+
+    /// <summary>
+    /// Starts an export requested by the viewer page: reads the current SVG
+    /// file, converts it to a data: URI (so the page's canvas is never
+    /// tainted by origin rules), and asks the page to rasterize it with the
+    /// chosen format, scale, and background.
+    /// </summary>
+    /// <param name="exportRequest">Message JSON containing format, scale, and background.</param>
+    private async Task BeginExportAsync(JsonElement exportRequest)
+    {
+        if (_currentFileIndex < 0 || _currentFileIndex >= _svgFilePathsInFolder.Count)
+        {
+            return;
+        }
+
+        string exportFormat = exportRequest.TryGetProperty("format", out JsonElement formatElement)
+            ? formatElement.GetString() ?? "png" : "png";
+        double exportScale = exportRequest.TryGetProperty("scale", out JsonElement scaleElement)
+            ? scaleElement.GetDouble() : 1;
+        string exportBackground = exportRequest.TryGetProperty("background", out JsonElement backgroundElement)
+            ? backgroundElement.GetString() ?? "white" : "white";
+
+        string currentFilePath = _svgFilePathsInFolder[_currentFileIndex];
+        string baseFileName = Path.GetFileNameWithoutExtension(currentFilePath);
+
+        byte[] svgFileBytes;
+        try
+        {
+            svgFileBytes = await File.ReadAllBytesAsync(currentFilePath);
+        }
+        catch (IOException)
+        {
+            return;
+        }
+
+        string svgDataUri = "data:image/svg+xml;base64," + Convert.ToBase64String(svgFileBytes);
+
+        string exportScript =
+            $"performExport({JsonSerializer.Serialize(svgDataUri)}, {JsonSerializer.Serialize(exportFormat)}, " +
+            $"{exportScale.ToString(System.Globalization.CultureInfo.InvariantCulture)}, " +
+            $"{JsonSerializer.Serialize(exportBackground)}, {JsonSerializer.Serialize(baseFileName)});";
+
+        await SvgWebView.CoreWebView2.ExecuteScriptAsync(exportScript);
+    }
+
+    /// <summary>
+    /// Receives the rasterized image back from the viewer page and saves it.
+    /// Normally shows a Save As dialog; when the WINSVG_TEST_EXPORT_PATH
+    /// environment variable is set (automated testing), writes there directly.
+    /// </summary>
+    /// <param name="saveRequest">Message JSON containing dataUrl and suggestedFileName.</param>
+    private void SaveExportedImage(JsonElement saveRequest)
+    {
+        string encodedDataUrl = saveRequest.TryGetProperty("dataUrl", out JsonElement dataUrlElement)
+            ? dataUrlElement.GetString() ?? string.Empty : string.Empty;
+        string suggestedFileName = saveRequest.TryGetProperty("suggestedFileName", out JsonElement fileNameElement)
+            ? fileNameElement.GetString() ?? "export.png" : "export.png";
+
+        int base64StartIndex = encodedDataUrl.IndexOf(',');
+        if (base64StartIndex < 0)
+        {
+            return;
+        }
+
+        byte[] exportedImageBytes;
+        try
+        {
+            exportedImageBytes = Convert.FromBase64String(encodedDataUrl[(base64StartIndex + 1)..]);
+        }
+        catch (FormatException)
+        {
+            return;
+        }
+
+        string? automatedTestOutputPath = Environment.GetEnvironmentVariable("WINSVG_TEST_EXPORT_PATH");
+        if (!string.IsNullOrEmpty(automatedTestOutputPath))
+        {
+            File.WriteAllBytes(automatedTestOutputPath, exportedImageBytes);
+            return;
+        }
+
+        string fileExtension = Path.GetExtension(suggestedFileName).TrimStart('.').ToLowerInvariant();
+        string dialogFilter = fileExtension switch
+        {
+            "jpg" => "JPEG image (*.jpg)|*.jpg",
+            "webp" => "WebP image (*.webp)|*.webp",
+            _ => "PNG image (*.png)|*.png",
+        };
+
+        var saveFileDialog = new SaveFileDialog
+        {
+            Title = "winSVG — Export image",
+            FileName = suggestedFileName,
+            Filter = dialogFilter,
+            DefaultExt = fileExtension,
+        };
+
+        if (saveFileDialog.ShowDialog(this) == true)
+        {
+            try
+            {
+                File.WriteAllBytes(saveFileDialog.FileName, exportedImageBytes);
+            }
+            catch (IOException writeError)
+            {
+                MessageBox.Show(this, $"Could not save the image:\n{writeError.Message}", "winSVG",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+    }
+
+    /// <summary>Ensures the automated-test export fires at most once per run.</summary>
+    private bool _automatedExportAlreadyTriggered;
+
+    /// <summary>
+    /// Automated-test hook: when WINSVG_TEST_EXPORT is set to
+    /// "format,scale,background", triggers one export after the first image
+    /// load so the full export pipeline can be verified without UI clicks.
+    /// </summary>
+    private async Task RunAutomatedExportIfRequestedAsync()
+    {
+        string? automatedExportSettings = Environment.GetEnvironmentVariable("WINSVG_TEST_EXPORT");
+        if (string.IsNullOrEmpty(automatedExportSettings) || _automatedExportAlreadyTriggered)
+        {
+            return;
+        }
+
+        string[] settingsParts = automatedExportSettings.Split(',');
+        if (settingsParts.Length != 3)
+        {
+            return;
+        }
+
+        _automatedExportAlreadyTriggered = true;
+
+        using JsonDocument syntheticRequest = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            command = "exportImage",
+            format = settingsParts[0],
+            scale = double.Parse(settingsParts[1], System.Globalization.CultureInfo.InvariantCulture),
+            background = settingsParts[2],
+        }));
+
+        await BeginExportAsync(syntheticRequest.RootElement);
     }
 
     /// <summary>

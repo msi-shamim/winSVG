@@ -7,7 +7,7 @@
 ;   ISCC.exe winSVG.iss
 
 #define MyAppName "winSVG"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "MSI Shamim"
 #define MyAppURL "https://github.com/msi-shamim/winSVG"
 #define MyProgId "SvgPreview.svg"
