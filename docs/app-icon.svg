@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="backgroundGradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7C3AED"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="curveGradient" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E0F2FE"/>
+    </linearGradient>
+  </defs>
+
+  <!-- App tile -->
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#backgroundGradient)"/>
+
+  <!-- Control-point handle lines (drawn under the curve) -->
+  <line x1="60" y1="172" x2="98" y2="70" stroke="#A5F3FC" stroke-width="7" stroke-linecap="round" opacity="0.85"/>
+  <line x1="196" y1="84" x2="158" y2="186" stroke="#A5F3FC" stroke-width="7" stroke-linecap="round" opacity="0.85"/>
+
+  <!-- The bezier curve: the heart of every vector graphic -->
+  <path d="M60 172 C 98 70, 158 186, 196 84"
+        fill="none" stroke="url(#curveGradient)" stroke-width="20" stroke-linecap="round"/>
+
+  <!-- Control points (circles) -->
+  <circle cx="98" cy="70" r="14" fill="#A5F3FC"/>
+  <circle cx="158" cy="186" r="14" fill="#A5F3FC"/>
+
+  <!-- Anchor points (squares) at the curve ends -->
+  <rect x="44" y="156" width="32" height="32" rx="8" fill="#FFFFFF"/>
+  <rect x="180" y="68" width="32" height="32" rx="8" fill="#FFFFFF"/>
+</svg>
